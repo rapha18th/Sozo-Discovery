@@ -5,6 +5,16 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Camera, X, Mic, Play, Square, User, Bot } from 'lucide-react';
 import { useConversation } from '@elevenlabs/react';
 import { GoogleGenAI } from '@google/genai';
+import dynamic from 'next/dynamic';
+
+const LocationPicker = dynamic(() => import('../components/LocationPicker'), { 
+  ssr: false,
+  loading: () => (
+    <div className="w-full bg-black border border-[#1c1c1c] p-[12px] sm:p-[14px] font-mono text-[12px] sm:text-[13px] text-[#2a2a2a] animate-pulse">
+      LOADING MAP SYSTEM...
+    </div>
+  )
+});
 
 // --- Types ---
 interface BOMItem {
@@ -464,12 +474,9 @@ Return ONLY valid JSON. No markdown. No preamble. No backticks.
                 <input type="file" className="hidden" accept="image/*" onChange={handleFileChange} />
               </label>
 
-              <input
-                type="text"
-                placeholder="OPERATIONAL LOCATION (city, country)"
-                value={location}
-                onChange={(e) => setLocation(e.target.value)}
-                className="w-full bg-black border border-[#1c1c1c] p-[12px] sm:p-[14px] font-mono text-[12px] sm:text-[13px] text-white placeholder:text-[#2a2a2a] focus:outline-none focus:border-[#e8ff00] transition-colors rounded-none"
+              <LocationPicker 
+                onLocationSelect={(val) => setLocation(val)} 
+                initialValue={location}
               />
 
               <button
