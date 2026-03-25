@@ -11,6 +11,8 @@ interface BOMItem {
   name: string;
   sourcing_location: string;
   expected_price: string;
+  accessibility: 'abundant' | 'regulated' | 'scarce' | 'critical';
+  sourcing_note: string;
 }
 
 interface BriefingData {
@@ -19,7 +21,7 @@ interface BriefingData {
   bom: BOMItem[];
   firecrawl_context: string;
   logistics_risk_profile: 'high' | 'medium' | 'low';
-  voice_briefing_summary: string;
+  conversational_briefing_summary: string;
   location: string;
   errors?: {
     firecrawl: string | null;
@@ -33,9 +35,10 @@ const INITIAL_STATUS_LINES: string[] = [
   'IMAGE RECEIVED — DECODING ASSET...',
   'GEMINI MATERIAL ANALYSIS: RUNNING',
   'BILL OF MATERIALS: EXTRACTING...',
-  'FIRECRAWL SEARCH: QUERY 1 OF 3...',
-  'FIRECRAWL SEARCH: QUERY 2 OF 3...',
-  'FIRECRAWL SEARCH: QUERY 3 OF 3...',
+  'FIRECRAWL SEARCH: QUERY 1 OF 4...',
+  'FIRECRAWL SEARCH: QUERY 2 OF 4...',
+  'FIRECRAWL SEARCH: QUERY 3 OF 4...',
+  'FIRECRAWL SEARCH: QUERY 4 OF 4...',
   'LOGISTICS RISK PROFILE: COMPUTING...',
   'SITUATIONAL BRIEFING: COMPILING...',
   'AGENT READY.',
@@ -46,11 +49,21 @@ const INITIAL_STATUS_LINES: string[] = [
 const BOMItemCard = ({ item }: { item: BOMItem }) => {
   const [isOpen, setIsOpen] = useState(false);
 
+  const getDifficultyColor = (acc: BOMItem['accessibility']) => {
+    switch (acc) {
+      case 'abundant': return 'border-[#e8ff00] text-[#e8ff00]';
+      case 'regulated': return 'border-[#3b82f6] text-[#3b82f6]';
+      case 'scarce': return 'border-[#f59e0b] text-[#f59e0b]';
+      case 'critical': return 'border-[#ff3b3b] text-[#ff3b3b]';
+      default: return 'border-[#1c1c1c] text-[#f0f0f0]';
+    }
+  };
+
   return (
     <div className="relative">
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="bg-[#0f0f0f] border border-[#1c1c1c] px-3 py-1.5 font-mono text-[10px] sm:text-[11px] text-[#f0f0f0] uppercase tracking-wider hover:border-[#e8ff00] transition-colors cursor-pointer text-left"
+        className={`bg-[#0f0f0f] border px-3 py-1.5 font-mono text-[10px] sm:text-[11px] uppercase tracking-wider transition-colors cursor-pointer text-left ${getDifficultyColor(item.accessibility)} hover:bg-white hover:text-black`}
       >
         {item.name}
       </button>
@@ -86,6 +99,18 @@ const BOMItemCard = ({ item }: { item: BOMItem }) => {
                 <div className="space-y-1">
                   <span className="font-mono text-[9px] text-[#5a5a5a] uppercase tracking-widest">Est. Unit Price</span>
                   <p className="font-mono text-[11px] text-white uppercase">{item.expected_price}</p>
+                </div>
+                <div className="space-y-1">
+                  <span className="font-mono text-[9px] text-[#5a5a5a] uppercase tracking-widest">Accessibility</span>
+                  <p className={`font-mono text-[11px] uppercase ${getDifficultyColor(item.accessibility).split(' ')[1]}`}>
+                    {item.accessibility}
+                  </p>
+                </div>
+                <div className="space-y-1">
+                  <span className="font-mono text-[9px] text-[#5a5a5a] uppercase tracking-widest">Sourcing Intelligence</span>
+                  <p className="font-mono text-[10px] text-[#f0f0f0] leading-tight italic">
+                    {item.sourcing_note}
+                  </p>
                 </div>
               </div>
 
@@ -188,24 +213,40 @@ export default function SozoDiscovery() {
 
     // 2. Data Fetching Promise with timeout
     const dataPromise = (async () => {
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('FORENSIC_TIMEOUT_EXCEEDED')), 45000)
-      );
+      console.log('DEBUG: Starting dataPromise (60s timeout)');
+      let timeoutId: NodeJS.Timeout;
+      const timeoutPromise = new Promise((_, reject) => {
+        timeoutId = setTimeout(() => {
+          console.error('DEBUG: dataPromise TIMEOUT EXCEEDED (60s)');
+          reject(new Error('FORENSIC_TIMEOUT_EXCEEDED'));
+        }, 60000);
+      });
 
       const fetchPromise = (async () => {
-        // Initialize Gemini
-        const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
-        if (!apiKey) {
-          console.error('DEBUG: NEXT_PUBLIC_GEMINI_API_KEY is missing');
-          throw new Error('GEMINI_API_KEY_MISSING');
-        }
-        
-        const ai = new GoogleGenAI({ apiKey });
-        
-        // Convert image to base64
-        const base64Data = imagePreview?.split(',')[1] || '';
-        
-        const prompt = `
+        try {
+          console.log('DEBUG: fetchPromise started');
+          // Initialize Gemini with prioritized key resolution
+          const apiKey = process.env.NEXT_PUBLIC_GEMINI_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY;
+          
+          const usedKeyName = process.env.NEXT_PUBLIC_GEMINI_KEY ? 'NEXT_PUBLIC_GEMINI_KEY' : 
+                              process.env.NEXT_PUBLIC_GEMINI_API_KEY ? 'NEXT_PUBLIC_GEMINI_API_KEY' : 
+                              'NONE';
+          
+          console.log(`DEBUG: Frontend Gemini using key from: ${usedKeyName}`);
+          
+          if (!apiKey) {
+            console.error('DEBUG: No Gemini API key found in environment');
+            throw new Error('GEMINI_API_KEY_MISSING');
+          }
+          
+          const ai = new GoogleGenAI({ apiKey });
+          
+          // Convert image to base64
+          console.log('DEBUG: Converting image to base64...');
+          const base64Data = imagePreview?.split(',')[1] || '';
+          console.log('DEBUG: Image conversion complete. Data length:', base64Data.length);
+          
+          const prompt = `
 You are the Sozo Forensic Material Engineer.
 Given an image and a location, identify the object and its 
 industrial material dependencies.
@@ -214,84 +255,107 @@ Rules:
 - BOM: list raw elements, specialised components, and chemical 
   requirements. Be specific — not "metal" but "carbon steel" 
   or "6061 aluminium alloy".
-- For EACH BOM item, identify the most likely sourcing location (e.g. "Shenzhen, CN", "Antwerp, BE") 
-  and an expected unit price in USD based on current market intelligence.
-- Generate exactly 3 Firecrawl search queries targeting spot prices, 
-  export duties, or port congestion for the identified materials 
-  relative to the given location. Make them high-intent and specific.
-- Flag any material under active geopolitical, environmental, 
-  or supply chain stress.
-- voice_briefing_summary: exactly 2 sentences. Lead with the risk. 
-  Be direct. No hedging.
+- For EACH BOM item, identify:
+  1. Most likely sourcing location (e.g. "Shenzhen, CN", "Antwerp, BE").
+  2. Expected unit price in USD.
+  3. Accessibility: one of "abundant", "regulated", "scarce", "critical".
+  4. Sourcing Note: a brief note on how easy it is to get this material.
+- Generate exactly 4 Firecrawl search queries:
+  - 3 targeting spot prices, export duties, or port congestion for the identified materials relative to the given location.
+  - 1 specifically searching for "approaches and new methods to manufacture, farm, mine, or create from scratch" for the hardest/most critical materials identified.
+- Flag any material under active geopolitical, environmental, or supply chain stress.
+- conversational_briefing_summary: exactly 2 sentences. Lead with the risk. Be direct. No hedging.
 
 Return ONLY valid JSON. No markdown. No preamble. No backticks.
 
 {
   "object_identified": "string",
   "bom": [
-    { "name": "material1", "sourcing_location": "location", "expected_price": "$xx.xx" },
-    { "name": "material2", "sourcing_location": "location", "expected_price": "$xx.xx" }
+    { 
+      "name": "material1", 
+      "sourcing_location": "location", 
+      "expected_price": "$xx.xx",
+      "accessibility": "abundant | regulated | scarce | critical",
+      "sourcing_note": "string"
+    }
   ],
-  "firecrawl_queries": ["query1", "query2", "query3"],
+  "firecrawl_queries": ["query1", "query2", "query3", "query4"],
   "logistics_risk_profile": "high | medium | low",
-  "voice_briefing_summary": "string"
+  "conversational_briefing_summary": "string"
 }
 `;
 
-        const result = await ai.models.generateContent({
-          model: 'gemini-3.1-pro-preview',
-          contents: [
-            {
-              parts: [
-                { text: prompt },
-                {
-                  inlineData: {
-                    mimeType: image.type,
-                    data: base64Data,
+          console.log('DEBUG: Sending image to Gemini 3.1 Flash Lite for analysis...');
+          const startTime = Date.now();
+          const result = await ai.models.generateContent({
+            model: 'gemini-3.1-flash-lite-preview',
+            contents: [
+              {
+                parts: [
+                  { text: prompt },
+                  {
+                    inlineData: {
+                      mimeType: image.type,
+                      data: base64Data,
+                    },
                   },
-                },
-                { text: `Location: ${location || 'Global'}` },
-              ],
-            },
-          ],
-        });
+                  { text: `Location: ${location || 'Global'}` },
+                ],
+              },
+            ],
+          });
+          console.log(`DEBUG: Gemini analysis complete in ${Date.now() - startTime}ms`);
 
-        const text = result.text;
-        if (!text) throw new Error('EMPTY_GEMINI_RESPONSE');
-        
-        const jsonMatch = text.match(/\{[\s\S]*\}/);
-        const geminiData = JSON.parse(jsonMatch ? jsonMatch[0] : text);
+          const text = result.text;
+          if (!text) {
+            console.error('DEBUG: Gemini returned an empty response');
+            throw new Error('EMPTY_GEMINI_RESPONSE');
+          }
+          
+          console.log('DEBUG: Parsing Gemini JSON response...');
+          const jsonMatch = text.match(/\{[\s\S]*\}/);
+          const geminiData = JSON.parse(jsonMatch ? jsonMatch[0] : text);
+          console.log('DEBUG: Gemini data parsed successfully. Object identified:', geminiData.object_identified);
 
-        // Step 2: Firecrawl Search via API
-        console.log('DEBUG: Calling /api/audit');
-        const searchRes = await fetch('/api/audit', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            queries: geminiData.bom.map((b: any) => b.name),
-            location: location || 'Global'
-          }),
-        });
-        
-        if (!searchRes.ok) {
-          const errorData = await searchRes.json().catch(() => ({}));
-          console.error('DEBUG: /api/audit failed:', errorData);
-          throw new Error(errorData.message || errorData.error || 'INTELLIGENCE_API_FAILURE');
+          // Step 2: Firecrawl Search via API
+          console.log('DEBUG: Calling /api/audit for Firecrawl intelligence...');
+          const apiStartTime = Date.now();
+          const searchRes = await fetch('/api/audit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+              queries: [...geminiData.bom.map((b: any) => b.name), ...geminiData.firecrawl_queries],
+              location: location || 'Global'
+            }),
+          });
+          
+          if (!searchRes.ok) {
+            const errorData = await searchRes.json().catch(() => ({}));
+            console.error('DEBUG: /api/audit failed with status:', searchRes.status, errorData);
+            throw new Error(errorData.message || errorData.error || 'INTELLIGENCE_API_FAILURE');
+          }
+          
+          const searchData = await searchRes.json();
+          console.log(`DEBUG: /api/audit response received in ${Date.now() - apiStartTime}ms`);
+
+          // Clear timeout as soon as we have a successful response
+          clearTimeout(timeoutId!);
+          console.log('DEBUG: Timeout cleared after successful response');
+
+          return {
+            object_identified: geminiData.object_identified,
+            bom_summary: geminiData.bom.map((b: any) => b.name).join(', '),
+            bom: searchData.bom_details || geminiData.bom,
+            firecrawl_context: searchData.firecrawl_context || '',
+            logistics_risk_profile: geminiData.logistics_risk_profile,
+            conversational_briefing_summary: geminiData.conversational_briefing_summary,
+            location: location || 'Global',
+            errors: searchData.errors,
+          };
+        } catch (e) {
+          clearTimeout(timeoutId!);
+          throw e;
         }
-        
-        const searchData = await searchRes.json();
-        console.log('DEBUG: /api/audit response:', searchData);
-
-        return {
-          object_identified: geminiData.object_identified,
-          bom_summary: geminiData.bom.map((b: any) => b.name).join(', '),
-          bom: searchData.bom_details || geminiData.bom,
-          firecrawl_context: searchData.firecrawl_context || 'Live intelligence unavailable.',
-          logistics_risk_profile: geminiData.logistics_risk_profile,
-          voice_briefing_summary: geminiData.voice_briefing_summary,
-          location: location || 'Global',
-          errors: searchData.errors,
-        };
       })();
 
       return Promise.race([fetchPromise, timeoutPromise]) as Promise<BriefingData>;
@@ -322,7 +386,7 @@ Return ONLY valid JSON. No markdown. No preamble. No backticks.
           location: briefing.location,
           bom_summary: briefing.bom_summary,
           logistics_risk_profile: briefing.logistics_risk_profile,
-          voice_briefing_summary: briefing.voice_briefing_summary,
+          conversational_briefing_summary: briefing.conversational_briefing_summary,
           firecrawl_context: briefing.firecrawl_context,
         },
       });
@@ -346,12 +410,11 @@ Return ONLY valid JSON. No markdown. No preamble. No backticks.
     <main className="min-h-screen flex flex-col items-center justify-center p-4 sm:p-6 relative overflow-hidden bg-black">
       {/* Fixed UI Elements */}
       <div className="fixed top-4 left-4 sm:top-8 sm:left-8 flex items-baseline gap-2 z-30">
-        <h1 className="font-syne text-lg sm:text-xl font-bold tracking-tight text-white">SOZO</h1>
-        <span className="font-mono text-[9px] sm:text-[11px] text-[#5a5a5a] tracking-widest-xl uppercase">Discovery</span>
+        <h1 className="font-syne text-lg sm:text-xl font-bold tracking-tight text-white uppercase">Sozo Discovery</h1>
       </div>
 
       <div className="fixed bottom-4 left-4 sm:bottom-8 sm:left-8 font-mono text-[8px] sm:text-[10px] text-[#2a2a2a] tracking-widest uppercase z-30 pointer-events-none">
-        SOZO ANALYTICS LAB · ELEVENHACKS S01 · FIRECRAWL x ELEVENLABS
+        DISCOVERY ANALYTICS LAB · ELEVENHACKS S01 · FIRECRAWL x ELEVENLABS
       </div>
 
       <AnimatePresence mode="wait">
@@ -506,9 +569,9 @@ Return ONLY valid JSON. No markdown. No preamble. No backticks.
               </section>
 
               <section className="space-y-3">
-                <h3 className="font-mono text-[10px] sm:text-[11px] text-[#5a5a5a] tracking-widest uppercase">Voice Briefing Lead</h3>
+                <h3 className="font-mono text-[10px] sm:text-[11px] text-[#5a5a5a] tracking-widest uppercase">Conversational Briefing Lead</h3>
                 <p className="font-syne text-[14px] sm:text-[15px] text-[#f0f0f0] italic leading-relaxed">
-                  &quot;{briefing.voice_briefing_summary}&quot;
+                  &quot;{briefing.conversational_briefing_summary}&quot;
                 </p>
               </section>
             </div>
@@ -518,7 +581,7 @@ Return ONLY valid JSON. No markdown. No preamble. No backticks.
               <div className="space-y-2">
                 <h3 className="font-syne text-base text-white uppercase">Forensic Interrogation</h3>
                 <p className="font-mono text-[10px] sm:text-[11px] text-[#5a5a5a] leading-relaxed">
-                  Your agent has been loaded with the full briefing. Begin the voice audit.
+                  Your agent has been loaded with the full briefing. Begin the conversational audit.
                 </p>
               </div>
 
@@ -550,7 +613,7 @@ Return ONLY valid JSON. No markdown. No preamble. No backticks.
                 {transcript.map((msg, i) => (
                   <div key={i} className="flex gap-2 items-start">
                     <span className={`font-mono text-[10px] sm:text-[11px] shrink-0 ${msg.role === 'agent' ? 'text-[#e8ff00]' : 'text-[#5a5a5a]'}`}>
-                      [{msg.role === 'agent' ? 'SOZO' : 'YOU'}]
+                      [{msg.role === 'agent' ? 'DISCOVERY' : 'YOU'}]
                     </span>
                     <span className="font-mono text-[11px] sm:text-[12px] text-[#f0f0f0] leading-tight">
                       {msg.text}

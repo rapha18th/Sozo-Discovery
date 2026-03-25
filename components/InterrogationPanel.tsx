@@ -10,7 +10,7 @@ interface Briefing {
   bom: string[];
   firecrawl_context: string;
   logistics_risk_profile: 'high' | 'medium' | 'low';
-  voice_briefing_summary: string;
+  conversational_briefing_summary: string;
 }
 
 interface Props {
@@ -66,7 +66,7 @@ export default function InterrogationPanel({ briefing, onNewAudit }: Props) {
           location: briefing.location,
           bom_summary: briefing.bom_summary,
           logistics_risk_profile: briefing.logistics_risk_profile,
-          voice_briefing_summary: briefing.voice_briefing_summary,
+          conversational_briefing_summary: briefing.conversational_briefing_summary,
           firecrawl_context: briefing.firecrawl_context,
         },
       });
@@ -118,7 +118,7 @@ export default function InterrogationPanel({ briefing, onNewAudit }: Props) {
           Forensic Interrogation
         </h3>
         <p style={{ fontFamily: 'DM Mono, monospace', fontSize: '11px', color: '#5a5a5a', margin: 0, lineHeight: '1.5' }}>
-          Your agent has been loaded with the full briefing. Begin the voice audit.
+          Your agent has been loaded with the full briefing. Begin the conversational audit.
         </p>
       </div>
 
@@ -181,7 +181,7 @@ export default function InterrogationPanel({ briefing, onNewAudit }: Props) {
                 color: msg.role === 'agent' ? '#e8ff00' : '#5a5a5a',
                 flexShrink: 0
               }}>
-                [{msg.role === 'agent' ? 'SOZO' : 'YOU'}]
+                [{msg.role === 'agent' ? 'DISCOVERY' : 'YOU'}]
               </span>
               <span style={{ 
                 fontFamily: 'DM Mono, monospace', 

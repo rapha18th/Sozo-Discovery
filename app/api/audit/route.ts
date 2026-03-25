@@ -55,6 +55,7 @@ export async function POST(req: NextRequest) {
       const fc = getFirecrawl();
       if (fc) {
         console.log(`DEBUG: Starting Firecrawl search for ${queries.length} queries`);
+        const searchStartTime = Date.now();
         const searchPromises = queries.map((query: string) => {
           console.log(`DEBUG: Searching for: "${query}"`);
           // Using a slightly longer timeout for search
@@ -66,6 +67,8 @@ export async function POST(req: NextRequest) {
         });
         
         const settledResults = await Promise.allSettled(searchPromises);
+        const searchEndTime = Date.now();
+        console.log(`DEBUG: All Firecrawl searches settled in ${searchEndTime - searchStartTime}ms`);
         
         settledResults.forEach((r, i) => {
           if (r.status === 'rejected') {
@@ -98,21 +101,35 @@ export async function POST(req: NextRequest) {
 
     const snippets = searchResults
       .map((res: any) => {
-        const snippet = res.data?.[0]?.description || res.data?.[0]?.snippet || res.data?.[0]?.markdown || '';
-        return snippet;
+        // Handle both 'data' (v0/v1) and 'web' (v1 search) formats
+        const items = res.data || res.web || [];
+        const first = items[0] || {};
+        return first.description || first.snippet || first.markdown || first.title || '';
       })
       .filter(Boolean);
     
     console.log(`DEBUG: Collected ${snippets.length} snippets`);
-    const firecrawlContext = snippets.join(' · ').slice(0, 1000);
+    const firecrawlContext = snippets.join(' · ').slice(0, 2000);
 
     // Step 2: Use Gemini to extract structured sourcing info from snippets
     let bomDetails: any[] = [];
     let extractionError: string | null = null;
     try {
       console.log('DEBUG: Starting Gemini extraction');
-      // Use GEMINI_API_KEY or NEXT_PUBLIC_GEMINI_API_KEY
-      const apiKey = process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY || '';
+      // Prioritize user-provided GEMINI_KEY over reserved GEMINI_API_KEY
+      const apiKey = process.env.GEMINI_KEY || 
+                     process.env.NEXT_PUBLIC_GEMINI_KEY ||
+                     process.env.GEMINI_API_KEY || 
+                     process.env.NEXT_PUBLIC_GEMINI_API_KEY || 
+                     '';
+      
+      const usedKeyName = process.env.GEMINI_KEY ? 'GEMINI_KEY' : 
+                          process.env.NEXT_PUBLIC_GEMINI_KEY ? 'NEXT_PUBLIC_GEMINI_KEY' :
+                          process.env.GEMINI_API_KEY ? 'GEMINI_API_KEY' : 
+                          process.env.NEXT_PUBLIC_GEMINI_API_KEY ? 'NEXT_PUBLIC_GEMINI_API_KEY' : 
+                          'NONE';
+      
+      console.log(`DEBUG: Gemini extraction using key from: ${usedKeyName}`);
       
       if (!apiKey) {
         console.error('DEBUG: Gemini API key is missing from environment');
@@ -123,19 +140,25 @@ export async function POST(req: NextRequest) {
       
       const extractionPrompt = `
         Based on these search results and the user's location (${location || 'Global'}), 
-        extract the most likely sourcing location and expected price for each item.
+        extract the most likely sourcing location, expected price, and accessibility for each item.
         
         Items: ${queries.join(', ')}
         Search Context: ${firecrawlContext || 'No search results available.'}
         
         Return ONLY valid JSON as an array of objects:
         [
-          { "name": "item_name", "sourcing_location": "city, country", "expected_price": "$xx.xx" }
+          { 
+            "name": "item_name", 
+            "sourcing_location": "city, country", 
+            "expected_price": "$xx.xx",
+            "accessibility": "abundant | regulated | scarce | critical",
+            "sourcing_note": "A brief note on sourcing intelligence found in the context"
+          }
         ]
       `;
 
       const geminiPromise = ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
+        model: 'gemini-3.1-flash-lite-preview',
         contents: extractionPrompt,
       });
 

@@ -14,7 +14,7 @@ const syne = Syne({
 });
 
 export const metadata: Metadata = {
-  title: 'SOZO DISCOVERY',
+  title: 'Sozo Discovery',
   description: 'Forensic Material Intelligence',
 };
 
