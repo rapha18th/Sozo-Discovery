@@ -21,6 +21,10 @@ interface BriefingData {
   logistics_risk_profile: 'high' | 'medium' | 'low';
   voice_briefing_summary: string;
   location: string;
+  errors?: {
+    firecrawl: string | null;
+    extraction: string | null;
+  };
 }
 
 // --- Constants ---
@@ -125,7 +129,8 @@ const TypewriterLine = ({ text, active, complete }: { text: string; active: bool
 };
 
 export default function SozoDiscovery() {
-  const [appState, setAppState] = useState<'IDLE' | 'PROCESSING' | 'BRIEFING'>('IDLE');
+  const [appState, setAppState] = useState<'IDLE' | 'PROCESSING' | 'BRIEFING' | 'ERROR'>('IDLE');
+  const [errorMessage, setErrorMessage] = useState('');
   const [image, setImage] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [location, setLocation] = useState('');
@@ -166,24 +171,41 @@ export default function SozoDiscovery() {
     if (!image) return;
     setAppState('PROCESSING');
     setActiveLineIndex(0);
+    setErrorMessage('');
 
-    // Simulation of status lines
-    const progressionInterval = setInterval(() => {
-      setActiveLineIndex(prev => {
-        if (prev < INITIAL_STATUS_LINES.length - 1) return prev + 1;
-        clearInterval(progressionInterval);
-        return prev;
-      });
-    }, 800);
+    // 1. Animation Promise
+    const animationPromise = new Promise((resolve) => {
+      let currentLine = 0;
+      const interval = setInterval(() => {
+        currentLine++;
+        setActiveLineIndex(currentLine);
+        if (currentLine >= INITIAL_STATUS_LINES.length - 1) {
+          clearInterval(interval);
+          resolve(true);
+        }
+      }, 700);
+    });
 
-    try {
-      // Initialize Gemini
-      const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_GEMINI_API_KEY || '' });
-      
-      // Convert image to base64
-      const base64Data = imagePreview?.split(',')[1] || '';
-      
-      const prompt = `
+    // 2. Data Fetching Promise with timeout
+    const dataPromise = (async () => {
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('FORENSIC_TIMEOUT_EXCEEDED')), 45000)
+      );
+
+      const fetchPromise = (async () => {
+        // Initialize Gemini
+        const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
+        if (!apiKey) {
+          console.error('DEBUG: NEXT_PUBLIC_GEMINI_API_KEY is missing');
+          throw new Error('GEMINI_API_KEY_MISSING');
+        }
+        
+        const ai = new GoogleGenAI({ apiKey });
+        
+        // Convert image to base64
+        const base64Data = imagePreview?.split(',')[1] || '';
+        
+        const prompt = `
 You are the Sozo Forensic Material Engineer.
 Given an image and a location, identify the object and its 
 industrial material dependencies.
@@ -216,60 +238,75 @@ Return ONLY valid JSON. No markdown. No preamble. No backticks.
 }
 `;
 
-      const result = await ai.models.generateContent({
-        model: 'gemini-3.1-pro-preview',
-        contents: [
-          {
-            parts: [
-              { text: prompt },
-              {
-                inlineData: {
-                  mimeType: image.type,
-                  data: base64Data,
+        const result = await ai.models.generateContent({
+          model: 'gemini-3.1-pro-preview',
+          contents: [
+            {
+              parts: [
+                { text: prompt },
+                {
+                  inlineData: {
+                    mimeType: image.type,
+                    data: base64Data,
+                  },
                 },
-              },
-              { text: `Location: ${location || 'Global'}` },
-            ],
-          },
-        ],
-      });
+                { text: `Location: ${location || 'Global'}` },
+              ],
+            },
+          ],
+        });
 
-      const text = result.text;
-      if (!text) throw new Error('EMPTY_GEMINI_RESPONSE');
-      
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      const geminiData = JSON.parse(jsonMatch ? jsonMatch[0] : text);
+        const text = result.text;
+        if (!text) throw new Error('EMPTY_GEMINI_RESPONSE');
+        
+        const jsonMatch = text.match(/\{[\s\S]*\}/);
+        const geminiData = JSON.parse(jsonMatch ? jsonMatch[0] : text);
 
-      // Step 2: Firecrawl Search via API
-      const searchRes = await fetch('/api/audit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          queries: geminiData.bom.map((b: any) => b.name),
-          location: location || 'Global'
-        }),
-      });
-      const searchData = await searchRes.json();
+        // Step 2: Firecrawl Search via API
+        console.log('DEBUG: Calling /api/audit');
+        const searchRes = await fetch('/api/audit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            queries: geminiData.bom.map((b: any) => b.name),
+            location: location || 'Global'
+          }),
+        });
+        
+        if (!searchRes.ok) {
+          const errorData = await searchRes.json().catch(() => ({}));
+          console.error('DEBUG: /api/audit failed:', errorData);
+          throw new Error(errorData.message || errorData.error || 'INTELLIGENCE_API_FAILURE');
+        }
+        
+        const searchData = await searchRes.json();
+        console.log('DEBUG: /api/audit response:', searchData);
 
-      setBriefing({
-        object_identified: geminiData.object_identified,
-        bom_summary: geminiData.bom.map((b: any) => b.name).join(', '),
-        bom: searchData.bom_details || geminiData.bom,
-        firecrawl_context: searchData.firecrawl_context || 'Live intelligence unavailable.',
-        logistics_risk_profile: geminiData.logistics_risk_profile,
-        voice_briefing_summary: geminiData.voice_briefing_summary,
-        location: location || 'Global',
-      });
+        return {
+          object_identified: geminiData.object_identified,
+          bom_summary: geminiData.bom.map((b: any) => b.name).join(', '),
+          bom: searchData.bom_details || geminiData.bom,
+          firecrawl_context: searchData.firecrawl_context || 'Live intelligence unavailable.',
+          logistics_risk_profile: geminiData.logistics_risk_profile,
+          voice_briefing_summary: geminiData.voice_briefing_summary,
+          location: location || 'Global',
+          errors: searchData.errors,
+        };
+      })();
 
-      // Wait for simulation to finish
+      return Promise.race([fetchPromise, timeoutPromise]) as Promise<BriefingData>;
+    })();
+
+    try {
+      const [briefingResult] = await Promise.all([dataPromise, animationPromise]);
+      setBriefing(briefingResult);
       setTimeout(() => {
         setAppState('BRIEFING');
-      }, 1500);
-
+      }, 1000);
     } catch (error) {
       console.error('Audit failed:', error);
-      setAppState('IDLE');
-      alert('AUDIT SYSTEM FAILURE. RESTARTING...');
+      setErrorMessage(error instanceof Error ? error.message : 'UNKNOWN_SYSTEM_FAILURE');
+      setAppState('ERROR');
     }
   };
 
@@ -444,8 +481,24 @@ Return ONLY valid JSON. No markdown. No preamble. No backticks.
               </section>
 
               <section className="space-y-3">
-                <h3 className="font-mono text-[10px] sm:text-[11px] text-[#5a5a5a] tracking-widest uppercase">Firecrawl Intelligence</h3>
-                <div className="border-l-2 border-[#e8ff00] pl-4 py-1">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-mono text-[10px] sm:text-[11px] text-[#5a5a5a] tracking-widest uppercase">Firecrawl Intelligence</h3>
+                  {briefing.errors?.firecrawl && (
+                    <div className="flex flex-col items-end">
+                      <span className="font-mono text-[9px] text-[#ff3b3b] uppercase animate-pulse">
+                        {briefing.errors.firecrawl === 'FIRECRAWL_API_KEY_MISSING' 
+                          ? '[CONFIG_MISSING: ADD FIRECRAWL_API_KEY TO SECRETS]' 
+                          : `[SEARCH_FAILURE: ${briefing.errors.firecrawl}]`}
+                      </span>
+                      {briefing.errors.firecrawl === 'FIRECRAWL_API_KEY_MISSING' && (
+                        <span className="font-mono text-[8px] text-[#5a5a5a] mt-1">
+                          Check secret name matches: FIRECRAWL_API_KEY
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <div className={`border-l-2 ${briefing.errors?.firecrawl ? 'border-[#ff3b3b]' : 'border-[#e8ff00]'} pl-4 py-1`}>
                   <p className="font-mono text-[11px] sm:text-[12px] text-[#5a5a5a] leading-relaxed italic">
                     {briefing.firecrawl_context}
                   </p>
@@ -513,6 +566,29 @@ Return ONLY valid JSON. No markdown. No preamble. No backticks.
                 New Audit
               </button>
             </div>
+          </motion.div>
+        )}
+
+        {appState === 'ERROR' && (
+          <motion.div
+            key="error"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="w-full max-w-[520px] space-y-6 text-center px-6"
+          >
+            <div className="space-y-2">
+              <h2 className="font-syne text-[24px] text-[#ff3b3b] uppercase">System Error</h2>
+              <p className="font-mono text-[12px] text-[#5a5a5a] uppercase tracking-widest leading-relaxed">
+                {errorMessage || 'Unknown Forensic Failure'}
+              </p>
+            </div>
+            <button
+              onClick={() => setAppState('IDLE')}
+              className="px-8 py-3 bg-[#1c1c1c] font-mono text-[11px] text-[#f0f0f0] uppercase tracking-widest hover:bg-[#e8ff00] hover:text-black transition-all rounded-none"
+            >
+              Restart System
+            </button>
           </motion.div>
         )}
       </AnimatePresence>
