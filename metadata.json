@@ -1,0 +1,5 @@
+{
+  "name": "Sozo Discovery",
+  "description": "Physical-world material intelligence forensic instrument.",
+  "requestFramePermissions": ["microphone"]
+}
