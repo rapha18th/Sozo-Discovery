@@ -20,8 +20,8 @@ export const metadata: Metadata = {
 
 export default function RootLayout({children}: {children: React.ReactNode}) {
   return (
-    <html lang="en" className={`${dmMono.variable} ${syne.variable}`}>
-      <body suppressHydrationWarning className="bg-black text-[#f0f0f0] font-mono selection:bg-[#e8ff00] selection:text-black">
+    <html lang="en" className={`${dmMono.variable} ${syne.variable}`} style={{ backgroundColor: '#000000' }}>
+      <body suppressHydrationWarning className="bg-black text-[#f0f0f0] font-mono selection:bg-[#e8ff00] selection:text-black" style={{ backgroundColor: '#000000', color: '#f0f0f0' }}>
         {children}
         <div className="fixed inset-0 pointer-events-none z-50 scanlines" />
       </body>

@@ -5,15 +5,8 @@ import { GoogleGenAI } from '@google/genai';
 let firecrawl: any = null;
 
 function getFirecrawl() {
-  // Check multiple possible secret names for resilience
-  const apiKey = process.env.FIRECRAWL_API_KEY || 
-                 process.env.NEXT_PUBLIC_FIRECRAWL_API_KEY || 
-                 process.env.FIRECRAWL_API_KEY_SECRET;
-  
-  // Diagnostic: Log available environment keys (not values) to help debug missing secrets
-  const envKeys = Object.keys(process.env).filter(k => k.toUpperCase().includes('FIRE') || k.toUpperCase().includes('CRAWL'));
-  console.log('DEBUG: Firecrawl Initialization. Relevant env keys found:', envKeys);
-  console.log('DEBUG: API Key resolved:', !!apiKey);
+  const apiKey = process.env.FIRECRAWL_API_KEY;
+  console.log('DEBUG: Firecrawl API Key present:', !!apiKey);
   
   if (!firecrawl) {
     if (!apiKey) {
@@ -21,9 +14,7 @@ function getFirecrawl() {
       return null;
     }
     try {
-      // Use default import for @mendable/firecrawl-js v4+
-      // @ts-ignore - Handling potential type mismatch in different SDK versions
-      firecrawl = new (FirecrawlApp.default || FirecrawlApp)({ apiKey });
+      firecrawl = new FirecrawlApp({ apiKey });
       console.log('DEBUG: FirecrawlApp instance created successfully');
     } catch (e) {
       console.error('DEBUG: Failed to create FirecrawlApp instance:', e);
@@ -37,8 +28,8 @@ export async function POST(req: NextRequest) {
   console.log('DEBUG: /api/audit POST request received');
   try {
     const body = await req.json();
+    console.log('DEBUG: Raw request body:', body);
     const { queries, location } = body;
-    console.log('DEBUG: Request body:', { queriesCount: queries?.length, location });
 
     if (!queries || !Array.isArray(queries) || queries.length === 0) {
       console.warn('DEBUG: No queries provided or queries is not an array');
@@ -58,7 +49,6 @@ export async function POST(req: NextRequest) {
         const searchStartTime = Date.now();
         const searchPromises = queries.map((query: string) => {
           console.log(`DEBUG: Searching for: "${query}"`);
-          // Using a slightly longer timeout for search
           const searchPromise = fc.search(query, { limit: 1 });
           const timeoutPromise = new Promise((_, reject) => 
             setTimeout(() => reject(new Error(`TIMEOUT_${query.slice(0, 10)}`)), 15000)
@@ -74,7 +64,7 @@ export async function POST(req: NextRequest) {
           if (r.status === 'rejected') {
             console.error(`DEBUG: Query "${queries[i]}" failed:`, r.reason);
           } else {
-            console.log(`DEBUG: Query "${queries[i]}" succeeded`);
+            console.log(`DEBUG: Query "${queries[i]}" succeeded. Raw value:`, (r as PromiseFulfilledResult<any>).value);
           }
         });
 
@@ -101,7 +91,6 @@ export async function POST(req: NextRequest) {
 
     const snippets = searchResults
       .map((res: any) => {
-        // Handle both 'data' (v0/v1) and 'web' (v1 search) formats
         const items = res.data || res.web || [];
         const first = items[0] || {};
         return first.description || first.snippet || first.markdown || first.title || '';
@@ -111,88 +100,14 @@ export async function POST(req: NextRequest) {
     console.log(`DEBUG: Collected ${snippets.length} snippets`);
     const firecrawlContext = snippets.join(' · ').slice(0, 2000);
 
-    // Step 2: Use Gemini to extract structured sourcing info from snippets
-    let bomDetails: any[] = [];
-    let extractionError: string | null = null;
-    try {
-      console.log('DEBUG: Starting Gemini extraction');
-      // Prioritize user-provided GEMINI_KEY over reserved GEMINI_API_KEY
-      const apiKey = process.env.GEMINI_KEY || 
-                     process.env.NEXT_PUBLIC_GEMINI_KEY ||
-                     process.env.GEMINI_API_KEY || 
-                     process.env.NEXT_PUBLIC_GEMINI_API_KEY || 
-                     '';
-      
-      const usedKeyName = process.env.GEMINI_KEY ? 'GEMINI_KEY' : 
-                          process.env.NEXT_PUBLIC_GEMINI_KEY ? 'NEXT_PUBLIC_GEMINI_KEY' :
-                          process.env.GEMINI_API_KEY ? 'GEMINI_API_KEY' : 
-                          process.env.NEXT_PUBLIC_GEMINI_API_KEY ? 'NEXT_PUBLIC_GEMINI_API_KEY' : 
-                          'NONE';
-      
-      console.log(`DEBUG: Gemini extraction using key from: ${usedKeyName}`);
-      
-      if (!apiKey) {
-        console.error('DEBUG: Gemini API key is missing from environment');
-        throw new Error('GEMINI_API_KEY_MISSING');
-      }
-      
-      const ai = new GoogleGenAI({ apiKey });
-      
-      const extractionPrompt = `
-        Based on these search results and the user's location (${location || 'Global'}), 
-        extract the most likely sourcing location, expected price, and accessibility for each item.
-        
-        Items: ${queries.join(', ')}
-        Search Context: ${firecrawlContext || 'No search results available.'}
-        
-        Return ONLY valid JSON as an array of objects:
-        [
-          { 
-            "name": "item_name", 
-            "sourcing_location": "city, country", 
-            "expected_price": "$xx.xx",
-            "accessibility": "abundant | regulated | scarce | critical",
-            "sourcing_note": "A brief note on sourcing intelligence found in the context"
-          }
-        ]
-      `;
-
-      const geminiPromise = ai.models.generateContent({
-        model: 'gemini-3.1-flash-lite-preview',
-        contents: extractionPrompt,
-      });
-
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('GEMINI_EXTRACTION_TIMEOUT')), 20000)
-      );
-
-      const result = await Promise.race([geminiPromise, timeoutPromise]) as any;
-      
-      const text = result.text;
-      console.log('DEBUG: Gemini extraction response received');
-      const jsonMatch = text.match(/\[[\s\S]*\]/);
-      if (jsonMatch) {
-        bomDetails = JSON.parse(jsonMatch[0]);
-        console.log(`DEBUG: Successfully parsed ${bomDetails.length} BOM items`);
-      } else {
-        console.warn('DEBUG: No JSON array found in Gemini response');
-        throw new Error('INVALID_EXTRACTION_FORMAT');
-      }
-    } catch (e) {
-      console.error('DEBUG: Gemini Extraction Error:', e);
-      extractionError = e instanceof Error ? e.message : 'EXTRACTION_FAILED';
-      // Fallback to basic names if extraction fails
-      bomDetails = queries.map(q => ({ name: q, sourcing_location: 'Unknown', expected_price: 'TBD' }));
-    }
-
-    return NextResponse.json({ 
+    const responseData = { 
       firecrawl_context: firecrawlContext,
-      bom_details: bomDetails,
       errors: {
-        firecrawl: firecrawlError,
-        extraction: extractionError
+        firecrawl: firecrawlError
       }
-    });
+    };
+    console.log('DEBUG: Sending final response data:', responseData);
+    return NextResponse.json(responseData);
 
   } catch (error) {
     console.error('DEBUG: Critical Search API Error:', error);

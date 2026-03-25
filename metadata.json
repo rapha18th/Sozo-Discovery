@@ -1,5 +1,5 @@
 {
   "name": "Sozo Discovery",
   "description": "Physical-world material intelligence forensic instrument. Requires FIRECRAWL_API_KEY in secrets.",
-  "requestFramePermissions": ["microphone"]
+  "requestFramePermissions": []
 }

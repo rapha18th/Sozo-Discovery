@@ -7,14 +7,15 @@ import 'leaflet/dist/leaflet.css';
 import { MapPin, Search, Loader2 } from 'lucide-react';
 
 // Fix for default marker icons in Leaflet with Next.js
-const DefaultIcon = L.icon({
-  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-});
-
-L.Marker.prototype.options.icon = DefaultIcon;
+const getIcon = () => {
+  if (typeof window === 'undefined') return null;
+  return L.icon({
+    iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+    shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+    iconSize: [25, 41],
+    iconAnchor: [12, 41],
+  });
+};
 
 interface LocationPickerProps {
   onLocationSelect: (location: string) => void;
@@ -43,6 +44,15 @@ export default function LocationPicker({ onLocationSelect, initialValue }: Locat
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [showMap, setShowMap] = useState(false);
+  const [icon, setIcon] = useState<L.Icon | null>(null);
+
+  useEffect(() => {
+    const defaultIcon = getIcon();
+    if (defaultIcon) {
+      L.Marker.prototype.options.icon = defaultIcon;
+      setIcon(defaultIcon);
+    }
+  }, []);
 
   useEffect(() => {
     if (initialValue && !searchQuery) {
