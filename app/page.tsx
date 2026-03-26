@@ -453,7 +453,7 @@ Return ONLY valid JSON. No markdown. No preamble. No backticks.
           console.log('DEBUG: Sending image to Gemini 3.1 Flash Lite for analysis...');
           const startTime = Date.now();
           const result = await ai.models.generateContent({
-            model: 'gemini-3.1-flash-lite-preview',
+            model: 'gemini-2.5-flash-lite',
             contents: [
               {
                 parts: [
