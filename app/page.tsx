@@ -614,7 +614,7 @@ Return ONLY valid JSON. No markdown. No preamble. No backticks.
       </div>
 
       <div className="fixed bottom-4 left-4 sm:bottom-8 sm:left-8 font-mono text-[8px] sm:text-[10px] text-[#2a2a2a] tracking-widest uppercase z-30 pointer-events-none">
-        DISCOVERY ANALYTICS LAB · ELEVENHACKS S01 · FIRECRAWL x ELEVENLABS
+        SOZO ANALYTICS LAB · ELEVENHACKS S01 · FIRECRAWL x ELEVENLABS
       </div>
 
       <AnimatePresence mode="wait">
